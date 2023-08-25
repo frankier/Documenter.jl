@@ -231,8 +231,8 @@ Selectors.order(::Type{Expanders.RawBlocks})      = 11.0
 
 Selectors.matcher(::Type{Expanders.TrackHeaders},   node, page, doc) = isa(node.element, MarkdownAST.Heading)
 Selectors.matcher(::Type{Expanders.MetaBlocks},     node, page, doc) = iscode(node, "@meta")
-Selectors.matcher(::Type{Expanders.DocsBlocks},     node, page, doc) = iscode(node, "@docs")
-Selectors.matcher(::Type{Expanders.AutoDocsBlocks}, node, page, doc) = iscode(node, "@autodocs")
+Selectors.matcher(::Type{Expanders.DocsBlocks},     node, page, doc) = iscode(node, r"^@docs(\s+secondary\s*)?")
+Selectors.matcher(::Type{Expanders.AutoDocsBlocks}, node, page, doc) = iscode(node, r"^@autodocs(\s+secondary\s*)?")
 Selectors.matcher(::Type{Expanders.EvalBlocks},     node, page, doc) = iscode(node, "@eval")
 Selectors.matcher(::Type{Expanders.IndexBlocks},    node, page, doc) = iscode(node, "@index")
 Selectors.matcher(::Type{Expanders.ContentsBlocks}, node, page, doc) = iscode(node, "@contents")
@@ -309,10 +309,39 @@ end
 # @docs
 # -----
 
+mk_secondary_re(tag) = Regex("^@" * tag * "\\s+secondary\\s*\$")
+const docs_secondary_re = mk_secondary_re("docs")
+const autodocs_secondary_re = mk_secondary_re("autodocs")
+
+function slugify_pagekey(page_ref)
+    page_ref = slugify(page_ref)
+    page_ref = replace(page_ref, "/" => "-")
+    page_ref = replace(page_ref, r"\.md$" => "")
+    return page_ref
+end
+
+function make_object(binding, typesig, is_secondary, doc, page)
+    object = Documenter.Object(binding, typesig)
+    if is_secondary
+        primary_anchor = string(object)
+        counter = get!(page.globals.meta, :secondary_docs_counter, Dict())
+        frag_extra = slugify_pagekey(pagekey(doc, page))
+        if primary_anchor in keys(counter)
+            counter[primary_anchor] += 1
+            frag_extra *= "-$(counter[primary_anchor])"
+        else
+            counter[primary_anchor] = 1
+        end
+        object = Documenter.Object(binding, typesig, frag_extra)
+    end
+    return object
+end
+
+
 function Selectors.runner(::Type{Expanders.DocsBlocks}, node, page, doc)
     @assert node.element isa MarkdownAST.CodeBlock
     x = node.element
-
+    is_secondary = match(docs_secondary_re, first(split(x.info, ';', limit = 2))) !== nothing
     docsnodes = Node[]
     curmod = get(page.globals.meta, :CurrentModule, Main)
     lines = Documenter.find_block_in_file(x.code, page.source)
@@ -350,8 +379,7 @@ function Selectors.runner(::Type{Expanders.DocsBlocks}, node, page, doc)
             continue
         end
         typesig = Core.eval(curmod, Documenter.DocSystem.signature(ex, str))
-
-        object = Documenter.Object(binding, typesig)
+        object = make_object(binding, typesig, is_secondary, doc, page)
         # We can't include the same object more than once in a document.
         if haskey(doc.internal.objects, object)
             @docerror(doc, :docs_block,
@@ -410,7 +438,7 @@ const AUTODOCS_DEFAULT_ORDER = [:module, :constant, :type, :function, :macro]
 function Selectors.runner(::Type{Expanders.AutoDocsBlocks}, node, page, doc)
     @assert node.element isa MarkdownAST.CodeBlock
     x = node.element
-
+    is_secondary = match(autodocs_secondary_re, first(split(x.info, ';', limit = 2))) !== nothing
     curmod = get(page.globals.meta, :CurrentModule, Main)
     fields = Dict{Symbol, Any}()
     lines = Documenter.find_block_in_file(x.code, page.source)
@@ -482,7 +510,7 @@ function Selectors.runner(::Type{Expanders.AutoDocsBlocks}, node, page, doc)
                     if filtered
                         for (typesig, docstr) in multidoc.docs
                             path = normpath(docstr.data[:path])
-                            object = Documenter.Object(binding, typesig)
+                            object = make_object(binding, typesig, is_secondary, doc, page)
                             if isempty(pages)
                                 push!(results, (mod, path, category, object, isexported, docstr))
                             else

@@ -2,7 +2,7 @@ using Base.Meta
 import Base: isdeprecated, Docs.Binding
 using DocStringExtensions
 import Markdown, MarkdownAST, LibGit2
-import Base64: stringmime
+import Base64: stringmime, base64encode
 
 
 using .Remotes: Remote, repourl, repofile
@@ -253,12 +253,15 @@ Represents an object stored in the docsystem by its binding and signature.
 struct Object
     binding   :: Binding
     signature :: Type
+    secondary_extra :: Union{String, Nothing}
 
-    function Object(b::Binding, signature::Type)
+    function Object(b::Binding, signature::Type, secondary_extra=nothing)
         m = nameof(b.mod) === b.var ? parentmodule(b.mod) : b.mod
-        new(Binding(m, b.var), signature)
+        new(Binding(m, b.var), signature, secondary_extra)
     end
 end
+
+is_secondary(o::Object) = o.secondary_extra !== nothing
 
 function splitexpr(x::Expr)
     isexpr(x, :macrocall) ? splitexpr(x.args[1]) :
@@ -292,7 +295,10 @@ end
 function Base.print(io::IO, obj::Object)
     print(io, obj.binding)
     print_signature(io, obj.signature)
+    print_extra(io, obj.secondary_extra)
 end
+print_extra(io::IO, secondary_extra::Nothing ) = nothing
+print_extra(io::IO, secondary_extra::String ) = print(io, "-", secondary_extra)
 print_signature(io::IO, signature::Union{Union, Type{Union{}}}) = nothing
 print_signature(io::IO, signature)        = print(io, '-', signature)
 

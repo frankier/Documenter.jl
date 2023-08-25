@@ -59,6 +59,23 @@ have a docstring attached to `foo(::Integer) = ...`, then neither `foo(::Number)
 The only way you can splice that docstring is by listing exactly `foo(::Integer)` in
 the at-docs block.
 
+### `@docs secondary` block
+
+You can pass the `secondary` keyword to `@docs` to indicate that the `@docs`
+should be be considered as non-canonical like so:
+
+````markdown
+```@docs secondary
+makedocs
+```
+````
+
+This is useful when you want to include a docstring inline somewhere, e.g. in
+a tutorial, but the canonical version of the docstring is already in the API
+reference. References will all point to the primary (non-secondary) `@docs`
+block. For a particular docstring, you can include it as many times as you like
+with `@docs secondary`, but only once without. Secondary `@docs` blocks are
+ignored when checking for missing docstrings.
 
 ## `@autodocs` block
 
@@ -154,6 +171,9 @@ Order = [:type]
 
     When more complex sorting is needed then use `@docs` to define it
     explicitly.
+
+As with `@docs`, the `secondary` keyword can be used to indicate that the
+`@autodocs` block in non-canonical. See [`@docs secondary`-block](@ref).
 
 ## `@ref` link
 
