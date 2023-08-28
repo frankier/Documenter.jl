@@ -440,6 +440,21 @@ function is_git_repo_root(directory::AbstractString; dbdir=".git")
     return false
 end
 
+"""
+    $(SIGNATURES)
+
+See if we can determine the remote using Pkg.
+"""
+function remote_from_pkg(directory::AbstractString)
+    isdir(directory) || error("remote_from_pkg called with non-directory path: $directory")
+    try
+        pkg = Pkg.Types.Context(Base.load_cache(directory))
+        pkg.status[1].repo
+    catch
+        return nothing
+    end
+end
+
 struct RepoCommitError <: Exception
     directory::String
     msg :: String
@@ -487,6 +502,15 @@ Stores the memoized results of [`getremote`](@ref).
 """
 const GIT_REMOTE_CACHE = Dict{String,Union{Remotes.Remote,Nothing}}()
 
+function parse_remote_url(remote)
+    # TODO: we only match for GitHub repositories automatically. Could we engineer a
+    # system where, if there is a user-created Remote, the user could also define a
+    # matching function here that tries to interpret other URLs?
+    m = match(LibGit2.GITHUB_REGEX, remote)
+    isnothing(m) && return nothing
+    return Remotes.GitHub(m[2], m[3])
+end
+
 """
 $(TYPEDSIGNATURES)
 
@@ -507,12 +531,7 @@ function getremote(dir::AbstractString)
             @debug "git config --get remote.origin.url failed" exception=(e, catch_backtrace())
             ""
         end
-        # TODO: we only match for GitHub repositories automatically. Could we engineer a
-        # system where, if there is a user-created Remote, the user could also define a
-        # matching function here that tries to interpret other URLs?
-        m = match(LibGit2.GITHUB_REGEX, remote)
-        isnothing(m) && return nothing
-        return Remotes.GitHub(m[2], m[3])
+        return parse_remote_url(remote)
     end
 end
 

@@ -688,6 +688,68 @@ function lt_remotepair(r1::RemoteRepository, r2::RemoteRepository)
     return length(r1.root) > length(r2.root)
 end
 
+src_to_uuid = nothing
+uuid_to_version = nothing
+
+function build_dep_info_dicts()
+    global src_to_uuid
+    global uuid_to_version
+    src_to_uuid = Dict()
+    uuid_to_version = Dict()
+
+    for (uuid, dep) in pairs(Pkg.dependencies())
+        src_to_uuid[dep.source] = uuid
+        uuid_to_version[uuid] = dep.version
+    end
+end
+
+function get_src_to_uuid()
+    if src_to_uuid === nothing
+        build_dep_info_dicts()
+    end
+    return src_to_uuid
+end
+
+function get_uuid_to_version()
+    if uuid_to_version === nothing
+        build_dep_info_dicts()
+    end
+    return uuid_to_version
+end
+
+function get_pkginfo(uuid)
+    for registry in RegistryInstances.reachable_registries()
+        for (registry_uuid, pkg) in registry.pkgs
+            if registry_uuid == uuid
+                return RegistryInstances.registry_info(pkg)
+            end
+        end
+    end
+end
+
+function get_package_entry(uuid)
+    env = Pkg.Types.EnvCache()
+    package_entry = Pkg.Types.manifest_info(env.manifest, uuid)
+    return package_entry
+end
+
+function uuid_to_repo(uuid)
+    pkginfo = get_pkginfo(uuid)
+    version = uuid_to_version[uuid]
+    if pkginfo === nothing
+        @debug "package not found in registries" uuid
+        return nothing
+    end
+    remote = parse_remote_url(pkginfo.repo)
+    if !(remote isa Remotes.GitHub)
+        @debug "could not get hash from repo -- only GitHub supported for now" pkginfo.repo
+        return nothing
+    end
+    tag_guess = "v" * string(version)
+    return (remote, tag_guess)
+end
+
+
 """
     $(SIGNATURES)
 
@@ -726,11 +788,26 @@ function relpath_from_remote_root(remotes::Vector{RemoteRepository}, path::Abstr
                 # and `continue`-ing if we detect that. But let's not add that complexity now.
                 # TODO: the RemoteRepository() call may throw -- we should handle this more gracefully
                 remoteref = RemoteRepository(directory, remote)
-                @debug "relpath_from_remote_root: adding remote" remoteref
+                @debug "relpath_from_remote_root: adding .git directory -based remote" remoteref
                 addremote!(remotes, remoteref)
                 root_remote = remoteref
             end
             return true
+        end
+        # Finally, we can try figuring out the remote from information
+        # obtainable through Pkg
+        src_to_uuid = get_src_to_uuid()
+        if haskey(src_to_uuid, directory)
+            uuid = src_to_uuid[directory]
+            repo_info = uuid_to_repo(uuid)
+
+            if repo_info !== nothing
+                remoteref = RemoteRepository(directory, repo_info[1], repo_info[2])
+                @debug "relpath_from_remote_root: adding pkg registry -based remote" remoteref
+                addremote!(remotes, remoteref)
+                root_remote = remoteref
+                return true
+            end
         end
         return false
     end
